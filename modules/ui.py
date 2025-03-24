@@ -3,16 +3,17 @@ from modules.fetcher import fetch_data
 from modules.processor import process_and_store
 from modules.utils import clear_messages, load_environment_variables
 from modules.qdrant_utils import initialize_collection, get_total_records_count
+from db_utils import load_cursor
 
 def fetch_prompts_ui():
     """UI for the fetch prompts functionality"""
     # Initialize session state variables
     if "target_count" not in st.session_state:
         st.session_state.target_count = 200
+    if "last_cursor" not in st.session_state:
+        st.session_state.last_cursor = load_cursor()
     if "fetch_mode" not in st.session_state:
         st.session_state.fetch_mode = "new"
-    if "last_cursor" not in st.session_state:
-        st.session_state.last_cursor = None
     if "collection_initialized" not in st.session_state:
         st.session_state.collection_initialized = initialize_collection()
 
@@ -44,10 +45,12 @@ def fetch_prompts_ui():
 
     with col2:
         # Fetch button
-        if st.button("Fetch Images", type="primary"):
+        if st.button("Fetch Prompts", type="primary"):
             continue_from_last = (fetch_mode == "Continue from last")
             check_new_images(continue_from_last=continue_from_last)
     
+    
+
     # Status section below the main controls
     st.write("\n---\n")  # Add line break before status
     status_col1, status_col2 = st.columns(2)
