@@ -1,6 +1,6 @@
 import streamlit as st
-from modules.qdrant_utils import store_in_vector_db
-from modules.refined_data_utils import process_item
+from modules.datafetcher.qdrant_utils import store_in_vector_db
+from modules.datafetcher.refined_data_utils import process_item
 
 def process_and_store(data):
     """Processes and stores the fetched data."""

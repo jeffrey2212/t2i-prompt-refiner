@@ -1,6 +1,6 @@
-from modules.ui import fetch_prompts_ui
+from modules.datafetcher.ui import fetch_prompts_ui
 import streamlit as st
-from db_utils import init_db
+from modules.db_utils import init_db
 
 def main():
     st.set_page_config(layout="wide")

@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import sqlite3
+from modules.db_utils import get_db_connection
 
 def load_environment_variables():
     """Load environment variables from .env file"""
@@ -12,13 +12,6 @@ def load_environment_variables():
 
 def clear_messages():
     st.session_state.messages = []
-
-def get_db_connection():
-    """Get a database connection"""
-    DATABASE_PATH = os.getenv("DATABASE_PATH", "./app.db")
-    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
 
 def save_cursor(cursor):
     """Save the cursor value to the database"""

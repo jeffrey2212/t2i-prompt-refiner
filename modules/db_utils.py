@@ -6,9 +6,9 @@ import json
 import streamlit as st
 
 # Database file path
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
 os.makedirs(DB_DIR, exist_ok=True)  # Create data directory if it doesn't exist
-DB_PATH = os.path.join(DB_DIR, 'chat_history.db')
+DB_PATH = os.path.join(DB_DIR, 'app.db')
 
 # Global flag to track initialization
 _DB_INITIALIZED = False

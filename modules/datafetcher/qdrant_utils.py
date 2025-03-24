@@ -9,7 +9,7 @@ load_dotenv()
 
 # Collection name constant
 COLLECTION_NAME = "civitai_images"
-VECTOR_SIZE = 512  # Size of the vector for storing image embeddings
+VECTOR_SIZE = 384  # Size of the vector for storing image embeddings
 
 def get_qdrant_client():
     """Get a connection to the Qdrant vector database"""

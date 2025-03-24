@@ -1,7 +1,7 @@
 import requests
 import os
 from dotenv import load_dotenv
-from db_utils import save_cursor, load_cursor, clear_cursor
+from modules.db_utils import save_cursor, load_cursor, clear_cursor
 
 # Load environment variables
 load_dotenv()
@@ -19,7 +19,6 @@ def fetch_data(target_count, continue_from_last=False):
             cursor = load_cursor()
 
         # Initialize variables
-        all_data = []
         total_fetched = 0
         page_size = min(100, target_count)  # Max 100 per request
 
@@ -46,23 +45,22 @@ def fetch_data(target_count, continue_from_last=False):
             if not items:
                 break
 
-            all_data.extend(items)
-            total_fetched += len(items)
-
-            # Update cursor
+            # Update cursor for next request
             metadata = data.get("metadata", {})
             cursor = metadata.get("nextCursor")
             if cursor:
                 save_cursor(cursor)
-            else:
-                break
 
-            # Break if we've reached the target
-            if total_fetched >= target_count:
-                break
+            # Calculate progress
+            total_fetched += len(items)
+            progress = min(100, int(total_fetched * 100 / target_count))
 
-        return all_data
+            # Yield the batch and progress
+            yield items, progress
+
+            if not cursor:
+                break
 
     except Exception as e:
         print(f"Error fetching data: {e}")
-        return None
+        raise
