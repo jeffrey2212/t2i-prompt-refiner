@@ -25,6 +25,12 @@ if "last_action" not in st.session_state:
     st.session_state.last_action = None
 if "_model" not in st.session_state:
     st.session_state._model = None
+if "last_cursor" not in st.session_state:
+    st.session_state.last_cursor = None
+if "fetch_mode" not in st.session_state:
+    st.session_state.fetch_mode = "new"  # "new" or "continue"
+if "target_models" not in st.session_state:
+    st.session_state.target_models = ["Illustrious", "Flux.1 D", "Pony"]
 
 # Load environment variables
 load_dotenv()
@@ -79,17 +85,23 @@ def clear_messages():
 def process_item(item):
     """Process a single item"""
     try:
-        if not item["meta"]["prompt"]:
+        # Skip if item is None or missing required fields
+        if not item or not isinstance(item, dict) or 'id' not in item:
+            add_message("warning", "Skipping invalid item (missing ID)")
             return None
             
-        # Check if item already exists in Qdrant
+        item_id = item["id"]
+        
+        # Check if this item already exists in Qdrant
         search_result = qdrant_client.scroll(
             collection_name="civitai_images",
             scroll_filter=rest.Filter(
                 must=[
                     rest.FieldCondition(
                         key="id",
-                        match=rest.MatchValue(value=item["id"])
+                        match=rest.MatchValue(
+                            value=item_id
+                        )
                     )
                 ]
             ),
@@ -98,74 +110,112 @@ def process_item(item):
         
         # Skip if already exists
         if search_result[0]:  # If any results found
-            add_message("info", f"Item {item['id']} already exists, skipping")
+            add_message("info", f"Item {item_id} already exists, skipping")
+            return None
+            
+        # Get the meta data safely
+        meta = item.get("meta", {})
+        if not meta or not isinstance(meta, dict):
+            add_message("warning", f"Item {item_id} has invalid meta data, skipping")
+            return None
+            
+        # Check for required fields
+        prompt = meta.get("prompt", "").strip()
+        if not prompt:
+            add_message("warning", f"Item {item_id} has no prompt, skipping")
+            return None
+            
+        # Check for base model
+        base_model = meta.get("baseModel", "Unknown")
+        if base_model not in st.session_state.target_models:
+            add_message("info", f"Item {item_id} has non-target model {base_model}, skipping")
             return None
             
         # Generate embedding
         model = get_model()
-        embedding = model.encode(item["meta"]["prompt"])
+        embedding = model.encode(prompt)
         
         # Store in Qdrant
         qdrant_client.upsert(
             collection_name="civitai_images",
-            points=[{
-                "id": item["id"],
-                "vector": embedding.tolist(),
-                "payload": {
-                    "id": item["id"],
-                    "url": item["url"],
-                    "baseModel": item["baseModel"],
-                    "meta": item["meta"],
-                    "stats": item["stats"]
-                }
-            }]
+            points=[
+                rest.PointStruct(
+                    id=item_id,
+                    vector=embedding.tolist(),
+                    payload={
+                        "id": item_id,
+                        "url": item.get("url", ""),
+                        "baseModel": base_model,
+                        "meta": meta
+                    }
+                )
+            ]
         )
         
-        add_message("success", f"Stored item {item['id']}")
-        st.session_state.stored_image_ids.add(item["id"])
+        add_message("success", f"Stored item {item_id}")
+        st.session_state.stored_image_ids.add(item_id)
         return item
             
     except Exception as e:
-        add_message("error", f"Error processing item {item['id']}: {str(e)}")
+        add_message("error", f"Error processing item {item.get('id', 'unknown')}: {str(e)}")
         return None
 
 def process_and_save_refined_data(data, output_file="processed_civitai_data.json"):
     """Process the raw data and save relevant information to a new JSON file"""
+    # Check if data is valid
+    if not data or not isinstance(data, list):
+        add_message("error", "Invalid data format received")
+        return []
+        
     processed_data = []
     
     for item in data:
-        meta = item.get("meta") or {}
-        prompt = meta.get("prompt", "").strip()
-        
+        # Skip invalid items
+        if not item or not isinstance(item, dict):
+            continue
+            
+        # Get meta data safely
+        meta = item.get("meta", {})
+        if not meta or not isinstance(meta, dict):
+            continue
+            
         # Skip items without prompts
-        if not prompt:
+        if not meta.get("prompt"):
+            continue
+            
+        # Get base model safely
+        base_model = meta.get("baseModel", "Unknown")
+        
+        # Skip if not in target models
+        if base_model not in st.session_state.target_models:
+            continue
+            
+        # Ensure item has an ID
+        if "id" not in item:
             continue
             
         processed_item = {
-            "id": item.get("id"),
-            "url": item.get("url"),
-            "baseModel": item.get("baseModel", "Unknown"),
-            "meta": {
-                "prompt": prompt,
-                "negativePrompt": meta.get("negativePrompt", "").strip(),
-                "seed": meta.get("seed"),
-                "steps": meta.get("steps"),
-                "sampler": meta.get("sampler"),
-                "cfgScale": meta.get("cfgScale")
-            },
-            "stats": item.get("stats", {})
+            "id": item["id"],
+            "url": item.get("url", ""),
+            "baseModel": base_model,
+            "meta": meta
         }
         processed_data.append(processed_item)
     
     # Save to JSON file (commented out but preserved)
-    # with open(output_file, 'w', encoding='utf-8') as f:
-    #     json.dump(processed_data, f, ensure_ascii=False, indent=4)
+    # with open(output_file, "w", encoding="utf-8") as f:
+    #     json.dump(processed_data, f, indent=2, ensure_ascii=False)
     
     return processed_data
 
 def process_and_store(data):
     """Process and store items in Qdrant"""
     try:
+        # Check if data is valid
+        if not data or not isinstance(data, list):
+            add_message("error", "No valid data to process")
+            return
+            
         # First, process and save the refined data
         processed_data = process_and_save_refined_data(data)
         
@@ -195,7 +245,7 @@ def process_and_store(data):
                 st.session_state.progress = i / total
                 
             except Exception as e:
-                add_message("error", f"Error processing item {item['id']}: {str(e)}")
+                add_message("error", f"Error processing item {item.get('id', 'unknown')}: {str(e)}")
                 continue
         
         # Update statistics immediately if we have results
@@ -217,47 +267,58 @@ def process_and_store(data):
         add_message("error", f"Error in process_and_store: {str(e)}")
         raise
 
-def fetch_data(target_count):
+def fetch_data(target_count, continue_from_last=False):
+    """Fetch data from Civitai API"""
     headers = {"Authorization": f"Bearer {civitai_api_key}"}
-    params = {
-        "limit": 200,
-        "sort": "Most Reactions",
-        "period": "Month"
-    }
     
     data = []
     total_fetched = 0
-    cursor = None
+    cursor = st.session_state.last_cursor if continue_from_last and st.session_state.last_cursor else None
     
     while total_fetched < target_count:
+        params = {
+            "limit": 200,  # Max allowed by API
+            "sort": "Most Reactions",
+            "period": "Month"
+        }
+        
         if cursor:
             params["cursor"] = cursor
             
-        response = requests.get(API_URL, headers=headers, params=params)
-        if response.status_code != 200:
-            add_message("error", f"API request failed with status {response.status_code}")
-            break
-            
-        json_data = response.json()
-        items = json_data.get("items", [])
-        
-        for item in items:
-            if total_fetched >= target_count:
+        try:
+            response = requests.get(API_URL, headers=headers, params=params)
+            if response.status_code != 200:
+                add_message("error", f"API request failed with status {response.status_code}")
                 break
-            if item and item.get("id"):
-                data.append(item)
-                total_fetched += 1
                 
-        st.session_state.progress = total_fetched / target_count
-        add_message("info", f"Fetched {total_fetched} of {target_count} images")
-        
-        metadata = json_data.get("metadata", {})
-        cursor = metadata.get("nextCursor")
-        if not cursor:
-            break
+            json_data = response.json()
+            items = json_data.get("items", [])
             
-    # Save to JSON file (commented out but preserved)
-    # save_to_json(data)
+            if not items:
+                add_message("info", "No more items available from API")
+                break
+                
+            for item in items:
+                if item and isinstance(item, dict) and item not in data:  # Avoid duplicates in the current batch
+                    data.append(item)
+                    total_fetched += 1
+                    
+            st.session_state.progress = total_fetched / target_count
+            add_message("info", f"Fetched {total_fetched} of {target_count} images")
+            
+            metadata = json_data.get("metadata", {})
+            cursor = metadata.get("nextCursor")
+            
+            # Save the cursor for next time
+            st.session_state.last_cursor = cursor
+            
+            if not cursor:
+                add_message("info", "Reached end of available data")
+                break
+        except Exception as e:
+            add_message("error", f"Error fetching data: {str(e)}")
+            break
+    
     return data
 
 def save_to_json(data, filename="civitai_data.json"):
@@ -323,6 +384,41 @@ def verify_qdrant_connection():
     except Exception as e:
         return False, f"Qdrant verification failed: {str(e)}"
 
+def delete_non_target_models():
+    """Delete records from Qdrant that don't match target models"""
+    try:
+        # First, get all records
+        results = qdrant_client.scroll(
+            collection_name="civitai_images",
+            limit=1000,  # Get in batches of 1000
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        records = results[0]
+        points_to_delete = []
+        
+        # Find records to delete
+        for record in records:
+            base_model = record.payload.get("baseModel", "Unknown")
+            if base_model not in st.session_state.target_models:
+                points_to_delete.append(record.id)
+        
+        # Delete points if any found
+        if points_to_delete:
+            qdrant_client.delete(
+                collection_name="civitai_images",
+                points_selector=rest.PointIdsList(points=points_to_delete)
+            )
+            add_message("success", f"Deleted {len(points_to_delete)} records with non-target models")
+        else:
+            add_message("info", "No non-target model records found to delete")
+            
+        return len(points_to_delete)
+    except Exception as e:
+        add_message("error", f"Error deleting non-target models: {str(e)}")
+        return 0
+
 # Verify Qdrant connection at startup
 qdrant_ok, qdrant_msg = verify_qdrant_connection()
 if not qdrant_ok:
@@ -355,6 +451,24 @@ with col1:
         step=200,
         help="Must be divisible by 200 due to API pagination"
     )
+    
+    fetch_mode = st.radio(
+        "Fetch mode",
+        options=["New data", "Continue from last"],
+        index=0,
+        help="'New data' starts from the beginning, 'Continue from last' uses the saved cursor"
+    )
+    st.session_state.fetch_mode = "continue" if fetch_mode == "Continue from last" else "new"
+    
+    # Target models selection
+    target_models = st.multiselect(
+        "Target models",
+        options=["Illustrious", "Flux.1 D", "Pony", "SDXL 1.0", "SD 1.5", "NoobAI"],
+        default=["Illustrious", "Flux.1 D", "Pony"],
+        help="Only process images from these models"
+    )
+    st.session_state.target_models = target_models
+    
     if st.button("Check New Images"):
         clear_messages()
         st.session_state.job_status = "Checking"
@@ -364,20 +478,44 @@ with col1:
 with col2:
     if st.session_state.new_images_estimate != 0:
         st.write(f"Estimated new images: {st.session_state.new_images_estimate}")
-        
-    if st.button("Start Processing"):
-        clear_messages()
-        st.session_state.job_status = "Running"
-        st.session_state.last_action = "process"
-        try:
-            data = fetch_data(target_count)
-            process_and_store(data)
-            st.session_state.job_status = "Complete"
-            add_message("success", "Processing completed successfully!")
-        except Exception as e:
-            add_message("error", f"Error in processing: {str(e)}")
-            st.session_state.job_status = "Error"
-        st.rerun()
+    
+    if st.session_state.last_cursor:
+        st.info(f"Saved cursor available for continuing")
+    
+    col2a, col2b = st.columns(2)
+    
+    with col2a:
+        if st.button("Start Processing"):
+            clear_messages()
+            st.session_state.job_status = "Running"
+            st.session_state.last_action = "process"
+            try:
+                continue_from_last = st.session_state.fetch_mode == "continue"
+                data = fetch_data(target_count, continue_from_last)
+                process_and_store(data)
+                st.session_state.job_status = "Complete"
+                add_message("success", "Processing completed successfully!")
+            except Exception as e:
+                add_message("error", f"Error in processing: {str(e)}")
+                st.session_state.job_status = "Error"
+            st.rerun()
+    
+    with col2b:
+        if st.button("Delete Non-Target Models", type="secondary"):
+            clear_messages()
+            st.session_state.job_status = "Deleting"
+            st.session_state.last_action = "delete"
+            try:
+                deleted_count = delete_non_target_models()
+                st.session_state.job_status = "Complete"
+                if deleted_count > 0:
+                    add_message("success", f"Successfully deleted {deleted_count} non-target model records")
+                else:
+                    add_message("info", "No non-target model records to delete")
+            except Exception as e:
+                add_message("error", f"Error during deletion: {str(e)}")
+                st.session_state.job_status = "Error"
+            st.rerun()
 
 # Status section
 st.header("Status")
