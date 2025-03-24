@@ -1,0 +1,21 @@
+[server]
+# Disable the file watcher completely to avoid PyTorch errors
+fileWatcherType = "none"
+
+[runner]
+# Disable module reloading on file changes
+fastReruns = false
+
+[global]
+# Disable module reloading on file changes
+runOnSave = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+# Custom theme settings
+primaryColor = "#7792E3"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
