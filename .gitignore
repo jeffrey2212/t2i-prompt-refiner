@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# program related json
+processed_civitai_data.json
+civitai_data.json
+
 # C extensions
 *.so
 
